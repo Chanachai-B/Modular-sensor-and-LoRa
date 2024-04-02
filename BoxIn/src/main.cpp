@@ -11,6 +11,7 @@
 #define SW_DEBOUNCE_TIME 400
 #define PRESSED_RESET_TIME 5000
 #define LCD_WORKING_TIME 30000
+#define LCD_DEBUG_TIME 5000
 #define INTERVAL_WAIT_PUMP 10000
 #define PERIOD_INTERVAL 1000
 #define FIVE_SECOND 5000
@@ -26,13 +27,15 @@ int periodSentData = 0;
 int statusSentData;
 boolean statusLCD = false;
 boolean lcdFlag = false;
-boolean debugMode = false;
+int debugMode = 0;
 boolean statusPump = false;
+boolean isBTNDebugPressed = false;
 unsigned long btnLcdPressed = 0;
 unsigned long btnModePressed = 0;
 String sensorData = "";
 unsigned long stateFive = 0;
 unsigned long timeToPressedBTN = 0;
+unsigned long timeToDebugLCD = 0;
 unsigned long timeToActiveLCD = 0;
 unsigned long timeSendDataWailPump = 0;
 unsigned long checkPressedOneSec = 0;
@@ -64,18 +67,16 @@ void setMode(boolean mode)
 void changeMode()
 {
     getConfigMode();
+    isBTNDebugPressed = true;
     statusLCD = true;
     Serial.println("Change mode");
-    if(debugMode){
-        debugMode = false;
-    }
-    else{
-        debugMode = true;
-    }
-    // debugMode = !debugMode;  //Tested and sometimes the variable has a value of 255 causing it to not exit Debug Mode.
+    if (debugMode)
+        debugMode = 0;
+    else
+        debugMode = 255;
     setMode(debugMode);
     Serial.println(debugMode);
-    timeToActiveLCD = millis();
+    timeToDebugLCD = millis();
     showMode(debugMode);
     updateConfigMode(debugMode);
 }
@@ -108,7 +109,7 @@ void showDisplay()
     {
         timeToActiveLCD = millis();
         lcdState = 2;
-        lcdFirstPage(batt, Lux, t_in_b, h_in_b);
+        lcdFirstPage(battPercent, Lux, t_in_b, h_in_b);
     }
     else if (lcdState == 2)
     {
@@ -146,10 +147,8 @@ IRAM_ATTR void btnActiveLcdIsPressed()
 {
     if (millis() - btnLcdPressed >= SW_DEBOUNCE_TIME)
     {
-        // statusSentData = false;
         btnState = 11;
         timeToPressedBTN = millis();
-        // Serial.println("btn lcd is pressed");
     }
     btnLcdPressed = millis();
 }
@@ -169,7 +168,7 @@ void setup()
 {
     EEPROM.begin(512);
     Serial.begin(115200);
-    // uncomment 173,174 to upload code first time.
+    // uncomment 172,173 to upload code first time.
     //  EEPROM.put(ADDR_MODE, 0);
     //  EEPROM.commit();
     initLoRa();
@@ -199,7 +198,7 @@ void loop()
         if (lcdState == 1)
         {
             lcdState = 2;
-            lcdFirstPage(batt, Lux, t_in_b, h_in_b);
+            lcdFirstPage(battPercent, Lux, t_in_b, h_in_b);
             lcdFlag = false;
         }
         else
@@ -209,6 +208,13 @@ void loop()
             lcdFlag = false;
         }
     }
+    if (millis() - timeToDebugLCD >= LCD_DEBUG_TIME && statusLCD && timeToDebugLCD != 0)
+    {
+        Serial.println("lcd off");
+        statusLCD = false;
+        lcdShutdown();
+    }
+    
     if (millis() - timeToActiveLCD >= LCD_WORKING_TIME && statusLCD) // Control screen to turn off.
     {
         Serial.println("lcd off");
@@ -219,12 +225,13 @@ void loop()
     if (btnState == 11) // Pressed button GPIO25
     {
         checkPressedOneSec = millis();
+        isBTNDebugPressed = false;
         statusLCD = true;
         int count = 0;
         while (digitalRead(BTN_ACTIVE_LCD) != 0)
         {
             Serial.println("Pressed");
-            if (millis() - timeToPressedBTN >= PRESSED_RESET_TIME)
+            if (count >= 5)
             {
                 Serial.println("Reset ESP");
                 esp_restart();
@@ -310,17 +317,29 @@ void loop()
                 else if (statusSentData == 3) // Hard reset from wweb server.
                 {
                     Serial.println("reset from web");
-                    esp_restart();
+                    int count = 5;
+                    unsigned long timeWaitReset = millis();
+                    resetPage(count);
+                    while (true)
+                    {
+                        if (btnState == 11 || btnState == 12) // Button is pressed. Exit loop.
+                        {
+                            break;
+                        }
+                        else if (count <= 0){
+                            Serial.println("ESP restart");
+                            esp_restart();
+                        }
+                        else if (millis() - timeWaitReset >= PERIOD_INTERVAL){
+                            timeWaitReset = millis();
+                            Serial.println(count);
+                            count--;
+                            resetPage(count);
+                        }
+                    }
                 }
-                // else // data not correct. Send again.
-                // {
-                //     periodSentData++;
-                //     Serial.print("LoRa sent fail resent : ");
-                //     Serial.println(periodSentData);
-                //     state = 1;
-                //     break;
-                // }
             }
+
             else if (millis() - timeSendDataWailPump >= INTERVAL_WAIT_PUMP && statusPump)
             {
                 statusPump = false;
@@ -330,11 +349,18 @@ void loop()
                 timeSendDataWailPump = millis();
                 break;
             }
-            else if (millis() - loraTime >= 5000 && (statusSentData == 0|| statusSentData == 11)) // Data not received within 5 seconds. Send again.
+
+            else if (millis() - loraTime >= 5000 && (statusSentData == 0 || statusSentData == 11)) // Data not received within 5 seconds. Send again.
             {
                 periodSentData++;
                 Serial.print("LoRa sent fail resent : ");
                 Serial.println(periodSentData);
+                state = 2;
+                break;
+            }
+            else if (millis() - loraTime >= 10000)
+            {
+                Serial.print("LoRa sent again");
                 state = 2;
                 break;
             }

@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <EEPROM.h>
+#include <EasyButton.h>
 #include "control/LoRa.h"
 #include "control/Sensor.h"
 #include "control/Display.h"
@@ -13,11 +14,16 @@
 #define SW_DEBOUNCE_TIME 400
 #define PRESSED_RESET_TIME 5000
 #define LCD_WORKING_TIME 30000
+#define LCD_DEBUG_TIME 5000
 #define TIME_WAIT_INPUT_CMD 5000
 #define PERIOD_INTERVAL 1000
 #define ADDR_MODE 0x70
 
-RTC_DATA_ATTR boolean debugMode = false;
+EasyButton buttonLCD(BTN_ACTIVE_LCD);
+EasyButton buttonMode(BTN_CHANGE_MODE);
+EasyButton buttonAC(BTN_ACTIVE_AC);
+
+int debugMode = 0;
 hw_timer_t *timer = NULL;
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -29,6 +35,7 @@ boolean statusLCD = false;
 boolean lcdFlag = false;
 boolean statusAC = false;
 boolean calibrationIsRunning = false;
+boolean isBTNDebugPressed = false;
 char cmd[10];
 String sensorData = "";
 unsigned long btnLcdPressed = 0;
@@ -36,13 +43,14 @@ unsigned long btnModePressed = 0;
 unsigned long btnAcPressed = 0;
 unsigned long previousMillisSw = 0;
 unsigned long timeToPressedBTN = 0;
+unsigned long timeToDebugLCD = 0;
 unsigned long timeToActiveLCD = 0;
 unsigned long timeToPumpActive = 0;
 unsigned long timeReadSensor = 0;
 unsigned long lastTimeInterval = 0;
 unsigned long stateFive = 0;
 unsigned long checkPressedOneSec = 0;
-unsigned long last[] = {0, 0, 0, 0, 0, 0, 0, 0};
+unsigned long previousMillisCheckPump = 0;
 
 int i = 0;
 bool readSerial(char result[])
@@ -79,9 +87,9 @@ void getConfigMode()
     EEPROM.get(ADDR_MODE, debugMode);
 }
 
-void setMode(boolean mode)
+void setMode(int mode)
 {
-    if (!mode)
+    if (mode == 0)
     {
         esp_sleep_enable_timer_wakeup(10 * 60 * 1000 * 1000);
     }
@@ -94,9 +102,14 @@ void setMode(boolean mode)
 void changeMode()
 {
     getConfigMode();
+    isBTNDebugPressed = true;
+    timeToDebugLCD = millis();
     statusLCD = true;
     Serial.println("Change mode");
-    debugMode = !debugMode;
+    if (debugMode)
+        debugMode = 0;
+    else
+        debugMode = 255;
     setMode(debugMode);
     Serial.println(debugMode);
     timeToActiveLCD = millis();
@@ -126,7 +139,7 @@ void showDisplay()
     {
         timeToActiveLCD = millis();
         lcdState = 2;
-        lcdFirstPage(batt, t_in_b, h_in_b);
+        lcdFirstPage(battPercent, t_in_b, h_in_b);
     }
     else if (lcdState == 2)
     {
@@ -142,13 +155,15 @@ void setPumpWorking(boolean status)
     Serial.print("setPumpWorking");
     Serial.println(status);
     digitalWrite(RELAY, status);
-    // Serial.println(status);
+    Serial.println(RELAY);
 }
 
 void toggleAC()
 {
+    isBTNDebugPressed = false;
     statusAC = !statusAC;
     setPumpWorking(statusAC);
+    state = 1;
 }
 
 void checkWakeupReason()
@@ -173,8 +188,7 @@ void checkWakeupReason()
     case 33:
         Serial.println("Wakeup by GPIO33");
         Serial.print("Active AC");
-        btnState = 13;
-        // toggleAC();
+        toggleAC();
         break;
     default:
         Serial.print("ESP32 wake up in another cause!!!!");
@@ -186,44 +200,50 @@ void setTimerPump()
     timeWorkingPump = timeWorkingPump * 60 * 1000;
 }
 
-IRAM_ATTR void btnActiveLcdIsPressed()
+void btnLcdOnPressed()
 {
-    if (millis() - btnLcdPressed >= SW_DEBOUNCE_TIME)
+    checkPressedOneSec = millis();
+    timeToPressedBTN = millis();
+    isBTNDebugPressed = false;
+    statusLCD = true;
+    int count = 0;
+    while (digitalRead(BTN_ACTIVE_LCD) != 0)
     {
-        // statusSentData = false;
-        btnState = 11;
-        timeToPressedBTN = millis();
-        // Serial.println("btn lcd is pressed");
+        // Serial.println("Pressed");
+        if (count >= 5)
+        {
+            Serial.println("Reset ESP");
+            esp_restart();
+        }
+        if (millis() - checkPressedOneSec >= PERIOD_INTERVAL)
+        {
+            checkPressedOneSec = millis();
+            count++;
+            lcdPressedBTN(count);
+        }
     }
-    btnLcdPressed = millis();
-}
-
-IRAM_ATTR void btnChangeModeIsPressed()
-{
-    if (millis() - btnModePressed >= SW_DEBOUNCE_TIME)
+    sensorData = readSensorAll();
+    Serial.println(sensorData);
+    Serial.println(lcdState);
+    if (lcdState == 0)
     {
-        // statusSentData = false;
-        btnState = 12;
-        // Serial.println("btn mode is pressed");
+        timeToActiveLCD = millis();
+        lcdState = 1;
+        showDisplay();
+        enableTimeInterrupt();
     }
-    btnModePressed = millis();
-}
-
-IRAM_ATTR void btnActiveAcIsPressed()
-{
-    if (millis() - btnAcPressed >= SW_DEBOUNCE_TIME)
+    else
     {
-        btnState = 13;
-        // Serial.println("btn AC is pressed");
+        timeToActiveLCD = millis();
+        showDisplay();
     }
-    btnAcPressed = millis();
 }
 
 void setup()
 {
-    EEPROM.begin(64);
+    EEPROM.begin(512);
     Serial.begin(115200);
-    //  EEPROM.put(ADDR_MODE, debugMode);
+    //  EEPROM.put(ADDR_MODE, 0);
     //  EEPROM.commit();
     initLoRa();
     Serial.println("LoRa init");
@@ -236,9 +256,6 @@ void setup()
     pinMode(BTN_ACTIVE_AC, INPUT);
     pinMode(RELAY, OUTPUT);
 
-    attachInterrupt(digitalPinToInterrupt(BTN_ACTIVE_LCD), btnActiveLcdIsPressed, RISING);
-    attachInterrupt(digitalPinToInterrupt(BTN_CHANGE_MODE), btnChangeModeIsPressed, RISING);
-    attachInterrupt(digitalPinToInterrupt(BTN_ACTIVE_AC), btnActiveAcIsPressed, RISING);
     esp_sleep_enable_ext1_wakeup(MODE_GPIO, ESP_EXT1_WAKEUP_ANY_HIGH);
     checkWakeupReason();
 
@@ -247,10 +264,16 @@ void setup()
     Serial.println(debugMode);
     setMode(debugMode);
     Serial.println("ESP Active");
+    buttonLCD.onPressed(btnLcdOnPressed);
+    buttonMode.onPressed(changeMode);
+    buttonAC.onPressed(toggleAC);
 }
 
 void loop()
 {
+    buttonLCD.read();
+    buttonMode.read();
+    buttonAC.read();
     if (lcdFlag) // Change the screen every time. When function changeDisplay works.
     {
         sensorData = readSensorAll();
@@ -258,7 +281,7 @@ void loop()
         {
             lcdState = 2;
             lcdFlag = false;
-            lcdFirstPage(batt, t_in_b, t_in_b);
+            lcdFirstPage(battPercent, t_in_b, t_in_b);
         }
         else
         {
@@ -267,67 +290,20 @@ void loop()
             lcdSecondPage(ecValue, phValue);
         }
     }
+
+    if (millis() - timeToDebugLCD >= LCD_DEBUG_TIME && statusLCD && timeToDebugLCD != 0)
+    {
+        Serial.println("lcd off");
+        statusLCD = false;
+        lcdShutdown();
+    }
+
     if (millis() - timeToActiveLCD >= LCD_WORKING_TIME && statusLCD) // Control screen to turn off.
     {
         Serial.println("lcd off");
         statusLCD = false;
         lcdShutdown();
         // timerAlarmDisable(timer);
-    }
-    if (btnState == 11) // Pressed button GPIO25
-    {
-        checkPressedOneSec = millis();
-        statusLCD = true;
-        int count = 0;
-        while (digitalRead(BTN_ACTIVE_LCD) != 0)
-        {
-            Serial.println("Pressed");
-            if (millis() - timeToPressedBTN >= PRESSED_RESET_TIME)
-            {
-                Serial.println("Reset ESP");
-                esp_restart();
-            }
-            if (millis() - checkPressedOneSec >= PERIOD_INTERVAL)
-            {
-                checkPressedOneSec = millis();
-                count++;
-                lcdPressedBTN(count);
-            }
-            // Serial.println(digitalRead(BTN_ACTIVE_LCD));
-        }
-        sensorData = readSensorAll();
-        Serial.println(sensorData);
-        Serial.println(lcdState);
-        if (lcdState == 0)
-        {
-            timeToActiveLCD = millis();
-            // lcdActive();
-            lcdState = 1;
-            showDisplay();
-            enableTimeInterrupt();
-        }
-        else
-        {
-            timeToActiveLCD = millis();
-            showDisplay();
-        }
-        
-        btnState = 0;
-    }
-    if (btnState == 12) // Pressed button GPIO35
-    {
-        changeMode();
-        btnState = 0;
-    }
-
-    if (btnState == 13)
-    {
-        Serial.println("btn AC is pressed");
-        toggleAC();
-        state = 1;
-        // sensorData = readSensorAll();
-        // sentLoRa(sensorData);
-        btnState = 0;
     }
 
     if (state == 1) // Read sensor all
@@ -360,6 +336,9 @@ void loop()
         loraTime = millis();
         while (true)
         {
+            buttonLCD.read();
+            buttonMode.read();
+            buttonAC.read();
             // waitDataInLoop();
             packetSize = LoRa.parsePacket();
             if (millis() - timeToPumpActive >= timeWorkingPump && timeWorkingPump != 0)
@@ -370,6 +349,9 @@ void loop()
                 timeWorkingPump = 0;
                 state = 4;
                 timeReadSensor = millis();
+                sensorData = readSensorAll();
+                delay(1000);
+                sentLoRa(sensorData + "," + statusAC);
                 break;
             }
             else if (packetSize) // ESP32 have receives data
@@ -378,12 +360,19 @@ void loop()
                 statusSentData = checkDataLoRa();
                 Serial.print("statusSentData : ");
                 Serial.println(statusSentData);
-                if (statusSentData == 0)
+                if (statusSentData == 0 && statusAC == 0)
                 {
                     // receivePage(true);
                     Serial.println("LoRa send success");
                     state = 4;
                     timeReadSensor = millis();
+                    break;
+                }
+                else if(statusSentData == 0 && statusAC == 1){
+                    Serial.println("LoRa send success but pump working");
+                    sensorData = readSensorAll();
+                    delay(1000);
+                    sentLoRa(sensorData + "," + statusAC);
                     break;
                 }
                 else if (statusSentData == 1)
@@ -394,18 +383,27 @@ void loop()
                     Serial.print("pump timer : ");
                     Serial.println(timeWorkingPump / 1000);
                     timeToPumpActive = millis();
+                    sensorData = readSensorAll();
+                    delay(1000);
+                    sentLoRa(sensorData + "," + statusAC);
                     break;
                 }
                 else if (statusSentData == 2)
                 {
                     Serial.println("Pump start working. Control by humidity");
                     setPumpWorking(HIGH);
+                    sensorData = readSensorAll();
+                    delay(1000);
+                    sentLoRa(sensorData + "," + statusAC);
                     break;
                 }
                 else if (statusSentData == 3)
                 {
                     Serial.println("Pump start working. Control by blynk");
                     setPumpWorking(HIGH);
+                    sensorData = readSensorAll();
+                    delay(1000);
+                    sentLoRa(sensorData + "," + statusAC);
                     break;
                 }
                 else if (statusSentData == 4)
@@ -414,40 +412,57 @@ void loop()
                     lcdShutdown();
                     setPumpWorking(LOW);
                     state = 1;
-                    // sensorData = readSensorAll();
+                    sensorData = readSensorAll();
                     delay(1000);
-                    // sentLoRa(sensorData+","+statusAC);
+                    sentLoRa(sensorData + "," + statusAC);
                     break;
                 }
                 else if (statusSentData == 10)
                 {
-                    Serial.println("ESP32 restart from web");
-                    esp_restart();
+                    Serial.println("reset from web");
+                    int count = 5;
+                    unsigned long timeWaitReset = millis();
+                    resetPage(count);
+                    while (true)
+                    {
+                        if (btnState == 11 || btnState == 12) // Button is pressed. Exit loop.
+                        {
+                            break;
+                        }
+                        else if (count <= 0)
+                        {
+                            Serial.println("ESP restart");
+                            esp_restart();
+                        }
+                        else if (millis() - timeWaitReset >= PERIOD_INTERVAL)
+                        {
+                            timeWaitReset = millis();
+                            Serial.println(count);
+                            count--;
+                            resetPage(count);
+                        }
+                    }
                 }
                 else if (statusSentData == 11 && periodSentData < 5 && millis() - loraTime >= 5000)
                 {
-                    // receivePage(false);
                     periodSentData++;
                     Serial.print("LoRa sent fail resent : ");
                     Serial.println(periodSentData);
                     state = 2;
                     break;
                 }
-                // else
-                // {
-                //     state = 3;
-                //     break;
-                // }
             }
-            // else if (statusAC == 1){
-            //     state = 3;
-            //     break;
-            // }
-            else if (millis() - loraTime >= 5000 && statusSentData == 11) // Data not received within 5 seconds. Send again.
+            else if (millis() - loraTime >= 5000 && (statusSentData == 0 || statusSentData == 11)) // Data not received within 5 seconds. Send again.
             {
                 periodSentData++;
                 Serial.print("LoRa sent fail resent : ");
                 Serial.println(periodSentData);
+                state = 2;
+                break;
+            }
+            else if (millis() - loraTime >= 10000)
+            {
+                Serial.print("LoRa sent again");
                 state = 2;
                 break;
             }
@@ -459,7 +474,7 @@ void loop()
                 timeReadSensor = millis();
                 break;
             }
-            else if (btnState == 11 || btnState == 12 || btnState == 13) // Button is pressed. Exit loop.
+            else if (state != 3)
             {
                 break;
             }
@@ -485,7 +500,7 @@ void loop()
                 {
                     Serial.println(F("[main]...>>>>>> calibration is running, to exit send exitph or exitec through serial <<<<<<"));
                     // EC
-                    ecVoltage = ecSensor.readADC_SingleEnded(0) / 10;
+                    ecVoltage = ecSensor.readADC_SingleEnded(3) / 10;
                     Serial.print(F("[EC Voltage]... ecVoltage: "));
                     Serial.println(ecVoltage);
                     ecValue = EC.readEC(ecVoltage, temperature); // convert voltage to EC with temperature compensation
@@ -493,7 +508,7 @@ void loop()
                     Serial.print(ecValue);
                     Serial.println(F("ms/cm"));
                     // pH
-                    phVoltage = pHSensor.readADC_SingleEnded(0) / 10;
+                    phVoltage = pHSensor.readADC_SingleEnded(3) / 10;
                     Serial.print(F("[pH Voltage]... phVoltage: "));
                     Serial.println(phVoltage);
                     phValue = PH.readPH(phVoltage, temperature);
@@ -537,19 +552,22 @@ void loop()
         stateFive = millis();
         bool statusData;
         int count = 5;
-        if (statusSentData == 0)
-        {
-            statusData = true;
-            receivePage(true);
-        }
-        else if (periodSentData >= 5)
+        if (periodSentData >= 5)
         {
             statusData = false;
             receivePage(false);
         }
+        else if (statusSentData == 0)
+        {
+            statusData = true;
+            receivePage(true);
+        }
         while (true)
         {
-            if (btnState == 11 || btnState == 12 || btnState == 13) // Button is pressed. Exit loop.
+            buttonLCD.read();
+            buttonMode.read();
+            buttonAC.read();
+            if (statusLCD || state != 5) // Button is pressed. Exit loop.
             {
                 break;
             }

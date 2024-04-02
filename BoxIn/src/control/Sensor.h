@@ -7,13 +7,17 @@
 #include <DHT.h>
 #include "INA219.h"
 
+#define BATT_LOW_LEVEL 2.5
+#define BATT_HIGH_LEVEL 4.2
+#define BATT_PERCENT_LOW 0.0
+#define BATT_PERCENT_HIGH 100.0
 #define luxSensor 0x23
 #define DHTPIN 15
 #define DHTTYPE DHT22
-#define DRY_MILLIVOLT 1980  // ค่าเอ้าต์พุท เมื่อทดสอบที่อากาศแห้ง
-#define WET_MILLIVOLT 1387  // ค่าเอ้าต์พุท เมื่อทดสอบน้ำเซนเซอร์จุ่มน้ำทั้งตัว
+#define DRY_MILLIVOLT 1980 // ค่าเอ้าต์พุท เมื่อทดสอบที่อากาศแห้ง
+#define WET_MILLIVOLT 1387 // ค่าเอ้าต์พุท เมื่อทดสอบน้ำเซนเซอร์จุ่มน้ำทั้งตัว
 
-float t_in_a, h_in_a, t_in_b, h_in_b, Lux, batt;
+float t_in_a, h_in_a, t_in_b, h_in_b, Lux, batt, battPercent;
 int h_in_s;
 // int cycleRead;
 Adafruit_AHTX0 aht;
@@ -24,58 +28,28 @@ uint8_t buf[4] = {0};
 DHT dht(DHTPIN, DHTTYPE);
 INA219 sensorBatt(0x40);
 
-// void initSensorBatt()
-// {
-//     if (!sensorBatt.begin())
-//     {
-//         // Serial.println("could not connect INA219. Fix and Reboot");
-//         batt = 0;
-//     }
-// }
-
-// void initSensorTempInAir()
-// {
-//     if (!aht.begin())
-//     {
-//         // Serial.println("Could not find AHT? Check wiring");
-//         t_in_a = 0;
-//         h_in_a = 0;
-//     }
-// }
-
-// void initSensorHumiInSoil()
-// {
-//     if (!humiditySoil.begin())
-//     {
-//         // Serial.println("Failed to initialize ADS.");
-//         h_in_s = 0;
-//     }
-// }
-
-// void initSensorTempInBox()
-// {
-//     dht.begin();
-// }
-
-// void initSensor()
-// {
-//     initSensorBatt();
-//     initSensorTempInAir();
-//     initSensorHumiInSoil();
-//     initSensorTempInBox();
-// }
-
 void readBatt()
 {
     if (!sensorBatt.begin())
     {
         Serial.println("could not connect INA219. Fix and Reboot");
         batt = 0;
+        battPercent = 0;
     }
     else
     {
         sensorBatt.setMaxCurrentShunt(5, 0.002);
         batt = sensorBatt.getBusVoltage();
+        battPercent = ((batt - BATT_LOW_LEVEL) * (BATT_PERCENT_HIGH - BATT_PERCENT_LOW)) / (BATT_HIGH_LEVEL - BATT_LOW_LEVEL) + BATT_PERCENT_LOW;
+        // battPercent = map(batt, BATT_LOW_LEVEL, BATT_HIGH_LEVEL, BATT_PERCENT_LOW, BATT_PERCENT_HIGH);
+    }
+    if (battPercent < 0)
+    {
+        battPercent = 0;
+    }
+    else if (battPercent > 100)
+    {
+        battPercent = 100;
     }
 }
 
@@ -84,8 +58,8 @@ void readTempInAir()
     if (!aht.begin())
     {
         // Serial.println("Could not find AHT? Check wiring");
-        t_in_a = 0;
-        h_in_a = 0;
+        t_in_a = -1;
+        h_in_a = -1;
     }
     else
     {
@@ -100,7 +74,7 @@ void readHumiInSoil()
     if (!humiditySoil.begin())
     {
         // Serial.println("Failed to initialize ADS.");
-        h_in_s = 0;
+        h_in_s = -1;
     }
     else
     {
@@ -111,10 +85,12 @@ void readHumiInSoil()
         Serial.println(sensorValue);
         Serial.print("Humidity : ");
         Serial.println(h_in_s);
-        if(h_in_s < 0){
+        if (h_in_s < 0)
+        {
             h_in_s = 0;
         }
-        else if(h_in_s > 100){
+        else if (h_in_s > 100)
+        {
             h_in_s = 100;
         }
     }
@@ -147,7 +123,7 @@ void readLight()
     if (checkLightsensor == 0)
     {
         Serial.println("ไม่พบเซนเซอร์แสง");
-        Lux = 0;
+        Lux = -1;
     }
     else
     {
@@ -164,8 +140,8 @@ void readTempInBox()
     if (isnan(h_in_b) || isnan(t_in_b))
     {
         Serial.println(F("Failed to read from DHT sensor!"));
-        h_in_b = 0;
-        t_in_b = 0;
+        h_in_b = -1;
+        t_in_b = -1;
         return;
     }
 }

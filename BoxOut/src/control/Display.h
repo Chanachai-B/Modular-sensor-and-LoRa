@@ -77,16 +77,24 @@ void lcdSecondPage(float ec, float pH)
     lcd.setCursor(0, 0);
     lcd.print("EC :");
     lcd.setCursor(11, 0);
-    lcd.print(ec);
+    if (ec == -1){
+        lcd.print("No Data");
+    }
+    else{
+        lcd.print(ec);
+    }
+        
     lcd.setCursor(0, 1);
     lcd.print("pH :");
     lcd.setCursor(11, 1);
-    lcd.print(pH);
+    if (pH == -1){
+        lcd.print("No Data");
+    }
+    else{
+        lcd.print(pH);
+    }
 }
 
-void calibratePage()
-{
-}
 
 void sentDataPage(int timeToSent)
 {
@@ -147,26 +155,14 @@ void receivePage(bool statusLoRa)
     }
 }
 
-void showStatusPumpPage()
+void resetPage()
 {
-}
-
-void resetPage(bool resetBTN)
-{
-    if(resetBTN){
         lcdInit();
         lcdPrintLine();
         lcd.setCursor(0,1);
         lcd.print("  Reset box sensor  ");
         lcd.setCursor(0,2);
         lcd.print("  Please wait.....  ");
-    }else{
-        lcdPrintLine();
-        lcd.setCursor(0,1);
-        lcd.print("  Reset box sensor  ");
-        lcd.setCursor(0,2);
-        lcd.print("  Please wait.....  ");
-    }
 }
 
 void sleepPage(int num, bool statusData)
@@ -202,4 +198,15 @@ void pumpActive(){
     lcdPrintLine();
     lcd.setCursor(0, 1);
     lcd.print("    Pump active    ");
+}
+
+void resetPage(int count){
+    lcdPrintLine();
+    lcd.clear();
+    lcd.setCursor(0, 1);
+    lcd.print("   BOX out reset   ");
+    lcd.setCursor(0,2);
+    lcd.print("  pressed wait : ");
+    lcd.setCursor(17,2);
+    lcd.print(count);
 }

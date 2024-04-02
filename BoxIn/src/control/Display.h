@@ -57,9 +57,9 @@ void lcdFirstPage(float batt, float lux, float temp, float humi)
 {
     Serial.print("in Display : ");
     Serial.print("t_in_b : ");
-    Serial.println(t_in_b);
+    Serial.println(temp);
     Serial.print("h_in_b : ");
-    Serial.println(h_in_b);
+    Serial.println(humi);
     lcdInit();
     Serial.println("lcdFirstPage");
     lcd.setCursor(0, 0);
@@ -69,15 +69,36 @@ void lcdFirstPage(float batt, float lux, float temp, float humi)
     lcd.setCursor(0, 1);
     lcd.print("Lux      :");
     lcd.setCursor(11, 1);
-    lcd.print(lux);
+    if (lux == -1)
+    {
+        lcd.print("No Data");
+    }
+    else
+    {
+        lcd.print(lux);
+    }
     lcd.setCursor(0, 2);
     lcd.print("T in Box :");
     lcd.setCursor(11, 2);
-    lcd.print(temp);
+    if (temp == -1)
+    {
+        lcd.print("No Data");
+    }
+    else
+    {
+        lcd.print(temp);
+    }
     lcd.setCursor(0, 3);
     lcd.print("H in Box :");
     lcd.setCursor(11, 3);
-    lcd.print(humi);
+    if (humi == -1)
+    {
+        lcd.print("No Data");
+    }
+    else
+    {
+        lcd.print(humi);
+    }
 }
 
 void lcdSecondPage(float tempA, float humiA, float humiS)
@@ -87,15 +108,36 @@ void lcdSecondPage(float tempA, float humiA, float humiS)
     lcd.setCursor(0, 0);
     lcd.print("T in Air :");
     lcd.setCursor(11, 0);
-    lcd.print(tempA);
+    if (tempA == -1)
+    {
+        lcd.print("No Data");
+    }
+    else
+    {
+        lcd.print(tempA);
+    }
     lcd.setCursor(0, 1);
     lcd.print("H in Air :");
     lcd.setCursor(11, 1);
-    lcd.print(humiA);
+    if (humiA == -1)
+    {
+        lcd.print("No Data");
+    }
+    else
+    {
+        lcd.print(humiA);
+    }
     lcd.setCursor(0, 2);
     lcd.print("H in Sol :");
     lcd.setCursor(11, 2);
-    lcd.print(humiS);
+    if (humiS == -1)
+    {
+        lcd.print("No Data");
+    }
+    else
+    {
+        lcd.print(humiS);
+    }
 }
 
 void sentDataPage(int timeToSent)
@@ -190,4 +232,15 @@ void sleepPage(int num, bool statusData)
     lcd.print("Box sensor Sleep : ");
     lcd.setCursor(19, 2);
     lcd.print(num);
+}
+
+void resetPage(int count){
+    lcdPrintLine();
+    lcd.clear();
+    lcd.setCursor(0, 1);
+    lcd.print("    BOX in reset   ");
+    lcd.setCursor(0,2);
+    lcd.print("  pressed wait : ");
+    lcd.setCursor(17,2);
+    lcd.print(count);
 }
