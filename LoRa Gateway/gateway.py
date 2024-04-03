@@ -4,9 +4,9 @@ from SX127x.board_config import BOARD
 import datetime
 import serial
 
-import BlynkLib
+import Blynk.BlynkLib as BlynkLib
 import RPi.GPIO as GPIO
-from BlynkTimer import BlynkTimer
+from Blynk.BlynkTimer import BlynkTimer
 import time
 
 BLYNK_AUTH_TOKEN_BOX_SENSOR = "vqDEKRMfj4SEdhQ6mU80EJ_HOAioW9ne"
@@ -55,9 +55,6 @@ def blynk_connected():
     
     box_in.sync_virtual(35)
 
-
-   
-    
 @box_out.on("connected")
 def blynk_connected():
     print("---------------------boxout---------------------------")
@@ -78,11 +75,8 @@ def blynk_connected():
     box_out.sync_virtual(48)
     box_out.sync_virtual(49)
 
-
     #switchallday
     box_out.sync_virtual(9)
-	
-	
 	
     #rangeone
     box_out.sync_virtual(20)
@@ -135,7 +129,6 @@ def blynk_connected():
     #Set pump with box_in Humidity
     box_out.sync_virtual(51)
     box_out.sync_virtual(52)
-
     
 @box_in.on("V1")
 def blynk_handle_vpins(value):
@@ -462,13 +455,6 @@ def blynk_handle_vpins(value):
     print("setstatusSaturday ",setstatussaturday)
 
 #############################333
-
-
-
-
-
-
-
     
 #rangeone
 
@@ -499,11 +485,6 @@ def blynk_handle_vpins(value):
     lora.setWaitpumpOne(setwaitpumpone)
     print("----------------------------------UPDATE--------------------------------------")
     print("setwaitpumpone ",setwaitpumpone)
-
-
-
-
-
 
 #rangetwo
 
@@ -698,9 +679,9 @@ def blynk_handle_vpins(value):
 
 BOARD.setup()
 
-class LoRaRcvCont(LoRa):
+class LoRaGateway(LoRa):
 	def __init__(self, verbose=False):
-		super(LoRaRcvCont, self).__init__(verbose)
+		super(LoRaGateway, self).__init__(verbose)
 		self.set_mode(MODE.SLEEP)
 		self.set_dio_mapping([0] * 6)
 		self.address_gateway ="255"
@@ -710,12 +691,16 @@ class LoRaRcvCont(LoRa):
 		self.setalertbatt_out = 0
 		self.battery_boxin=0
 		self.battery_boxout=0
-		self.addressNode_rx = 0
-		self.addressGateway_rx = 0
 		self.receivedboxout_data = 0
 		self.receivedboxin_data = 0
 		self.tempinbox_in = 0
 		self.tempinair = 0
+		self.humi_soil = 0
+		self.last_humi_soil = 0
+		self.statePump = 0
+		self.statusPump = 0
+		self.pumpWorkByHumiDone = False
+		self.statusPumpOnBoxOut = 0
 		
 		self.statusBox = False
 		self.statusBoxin = False
@@ -872,12 +857,6 @@ class LoRaRcvCont(LoRa):
 		else:
 			self.setsaturday = ""   
     
-    
-    
-   
-    
-    
-    
     #battin
 	def setBatt_in(self, setbatt_in):
 		self.battery_boxin = setbatt_in
@@ -895,6 +874,7 @@ class LoRaRcvCont(LoRa):
 			print("การแจ้งเตือนแบต",self.battery_boxin,"<",self.setalertbatt_in)
 			if(self.battery_boxin<self.setalertbatt_in): #50<51
 				box_in.virtual_write(8, 1)
+				box_in.log_event("batt_alarm", "แบตเตอรี่ต่ำกว่าค่าที่กำหนด")
 			else:
 				box_in.virtual_write(8, 0)
 		else:
@@ -920,9 +900,13 @@ class LoRaRcvCont(LoRa):
 	def checkAleartTempBox_in(self):
        # print(self.tempinbox_in,"<",self.setalerttempboxlow_in," or ", self.tempinbox_in ">",self.setalerttempboxhigh_in )
 		if self.setswitchtempboxin == 1:
-			if self.tempinbox_in < self.setalerttempboxlow_in or self.tempinbox_in > self.setalerttempboxhigh_in: # temp < setlow or temp > sethigh
+			if self.tempinbox_in < self.setalerttempboxlow_in: # temp < setlow or 
 				box_in.virtual_write(10, 1)
-			else:
+				box_in.log_event("temp_box_alarm", "อุณหภูมิในกล่องต่ำกว่าที่กำหนด")
+			elif self.tempinbox_in > self.setalerttempboxhigh_in : #temp > sethigh
+				box_in.virtual_write(10, 0)
+				box_in.log_event("temp_box_alarm", "อุณหภูมิในกล่องสูงกว่าที่กำหนด")
+			else :
 				box_in.virtual_write(10, 0)
 		else:
 			box_in.virtual_write(10, 0)
@@ -950,8 +934,12 @@ class LoRaRcvCont(LoRa):
 	def checkAleartTempAir_in(self):
 		if self.setswitchtempboxair == 1:
 			print(self.tempinair,"<",self.setalerttempairlow_in," or ",self.tempinair,">",self.setalerttempairhigh_in)
-			if self.tempinair < self.setalerttempairlow_in or self.tempinair > self.setalerttempairhigh_in: # temp < setlow or temp > sethigh
+			if self.tempinair < self.setalerttempairlow_in : # temp < setlow
 				box_in.virtual_write(18, 1)
+				box_in.log_event("temp_air_alarm", "อุณหภูมิในกล่องต่ำกว่าที่กำหนด")
+			elif self.tempinair > self.setalerttempairhigh_in :
+				box_in.virtual_write(18, 1)
+				box_in.log_event("temp_air_alarm", "อุณหภูมิในกล่องสูงกว่าที่กำหนด") # temp > sethigh
 			else:
 				box_in.virtual_write(18, 0)
 		else:
@@ -977,8 +965,12 @@ class LoRaRcvCont(LoRa):
 	def checkAlartHumBox_in(self):
 		print (self.huminbox ,"<",self.setalerthumboxlow_in," or ",self.huminbox,">",self.setalerthumboxhigh_in)
 		if self.setswitchhumboxin == 1:
-			if self.huminbox < self.setalerthumboxlow_in or self.huminbox > self.setalerthumboxhigh_in:
+			if self.huminbox < self.setalerthumboxlow_in :
 				box_in.virtual_write(22, 1)
+				box_in.log_event("humi_box_alarm", "ความชื้นในกล่องต่ำกว่าที่กำหนด")
+			elif self.huminbox > self.setalerthumboxhigh_in:
+				box_in.virtual_write(22, 1)
+				box_in.log_event("humi_box_alarm", "ความชื้นในกล่องสูงกว่าที่กำหนด")
 			else:
 				box_in.virtual_write(22, 0)
 		else:
@@ -1006,8 +998,12 @@ class LoRaRcvCont(LoRa):
 	def checkAlartHumAir_in(self):
 		print (self.huminair ,"<",self.setalerthumairlow_in," or ",self.huminair,">",self.setalerthumairhigh_in)
 		if self.setswitchhumairin == 1:
-			if self.huminair < self.setalerthumairlow_in or self.huminair > self.setalerthumairhigh_in:
+			if self.huminair < self.setalerthumairlow_in :
 				box_in.virtual_write(25, 1)
+				box_in.log_event("humi_air_alarm", "ความชื้นในอากาศต่ำกว่าที่กำหนด")
+			elif self.huminair > self.setalerthumairhigh_in :
+				box_in.virtual_write(25, 1)
+				box_in.log_event("temp_air_alarm", "ความชื้นในอากาศสูงกว่าที่กำหนด")
 			else:
 				box_in.virtual_write(25, 0)
 		else:
@@ -1034,8 +1030,12 @@ class LoRaRcvCont(LoRa):
 	def checkAlartHumSoil_in(self):
 		print (self.huminsoil ,"<",self.setalerthumsoillow_in," or ",self.huminsoil,">",self.setalerthumsoilhigh_in)
 		if self.setswitchhumsoilin == 1:
-			if self.huminsoil < self.setalerthumsoillow_in or self.huminsoil > self.setalerthumsoilhigh_in:
+			if self.huminsoil < self.setalerthumsoillow_in :
 				box_in.virtual_write(30, 1)
+				box_in.log_event("humi_soil_alarm", "ความชื้นในดินต่ำกว่าที่กำหนด")
+			elif self.huminsoil > self.setalerthumsoilhigh_in :
+				box_in.virtual_write(30, 1)
+				box_in.log_event("humi_soil_alarm", "ความชื้นในดินสูงกว่าที่กำหนด")
 			else:
 				box_in.virtual_write(30, 0)
 		else:
@@ -1067,6 +1067,8 @@ class LoRaRcvCont(LoRa):
 		if self.setswitcbattout ==1:
 			if(self.battery_boxout<self.setalertbatt_out): #
 				box_out.virtual_write(6, 1)
+				print("Alert Batttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt")
+				box_out.log_event("batt_alarm", "แบตเตอรีต่ำกว่าค่าที่กำหนด")
 			else:
 				box_out.virtual_write(6, 0)
 		else:
@@ -1099,8 +1101,12 @@ class LoRaRcvCont(LoRa):
 	def checkAleartTempBox_out(self):
 		print(self.tempoutbox_out,"<",self.setalerttempboxlow_out," or ", self.tempoutbox_out ,">",self.setalerttempboxhigh_out )
 		if self.setswitchtempboxout == 1:
-			if self.tempoutbox_out < self.setalerttempboxlow_out or self.tempoutbox_out > self.setalerttempboxhigh_out: # temp < setlow or temp > sethigh
+			if self.tempoutbox_out < self.setalerttempboxlow_out: # temp < setlow
 				box_out.virtual_write(45, 1)
+				box_out.log_event("temp_alarm","อุณหภูมิในกล่องต่ำกว่าที่กำหนด")
+			elif self.tempoutbox_out > self.setalerttempboxhigh_out: #temp > sethigh
+				box_out.virtual_write(45, 1)
+				box_out.log_event("temp_alarm","อุณหภูมิในกล่องสูงกว่าที่กำหนด")
 			else:
 				box_out.virtual_write(45, 0)
 		else:
@@ -1126,8 +1132,12 @@ class LoRaRcvCont(LoRa):
 	def checkAlartHumBox_out(self):
 		print (self.humoutbox ,"<",self.setalerthumboxlow_out," or ",self.humoutbox,">",self.setalerthumboxhigh_out)
 		if self.setswitchhumboxout == 1:
-			if self.humoutbox < self.setalerthumboxlow_out or self.humoutbox > self.setalerthumboxhigh_out:
+			if self.humoutbox < self.setalerthumboxlow_out :
 				box_out.virtual_write(47, 1)
+				box_out.log_event("humi_alarm","ความชื้นในกล่องต่ำกว่าที่กำหนด")
+			elif self.humoutbox > self.setalerthumboxhigh_out:
+				box_out.virtual_write(47, 1)
+				box_out.log_event("humi_alarm","ความชื้นในกล่องสูงกว่าที่กำหนด")
 			else:
 				box_out.virtual_write(47, 0)
 		else:
@@ -1248,13 +1258,18 @@ class LoRaRcvCont(LoRa):
 			box_out.virtual_write(0, self.tempoutbox_out)
 			box_out.virtual_write(1, self.humoutbox)
 			box_out.virtual_write(2, self.battery_boxout)
-			box_out.virtual_write(3, self.ph)
-			box_out.virtual_write(4, self.ec)
-			box_out.virtual_write(41, self.statusPumpOnBoxOut)
+			if self.ph != 999 :
+				box_out.virtual_write(3, self.ph)
+			if self.ec != 999 :
+				box_out.virtual_write(4, self.ec)
+			box_out.virtual_write(41, self.statusPumpOnBoxOut)	  
 			box_out.virtual_write(50, self.statusPumpWorking)
+			if self.statusPumpOnBoxOut == 4 :
+				box_out.virtual_write(50, 0)
 			self.checkAlertBatt_out()
 			self.checkAleartTempBox_out()
 			self.checkAlartHumBox_out()
+			print("statusPumpOnBoxOut : ",self.statusPumpOnBoxOut)
 			print("upload Boxout to Blynk")
 			self.statusBoxoutblynk = False
 		
@@ -1705,29 +1720,50 @@ class LoRaRcvCont(LoRa):
 		if box == "in":
 			box_in.virtual_write(35,0)
 			box_in.virtual_write(36,1)
+			box_in.log_event("lora_not_connect", "ติดต่อ กล่องเซนเซอร์ไม่ได้")
 		elif box == "out" :
 			box_out.virtual_write(53,0)
 			box_out.virtual_write(54,1)
+			box_out.log_event("lora_not_connect", "ติดต่อ กล่องเซนเซอร์ไม่ได้")
 		
 	def start(self):
 		self.reset_ptr_rx()
 		self.set_mode(MODE.RXCONT)
 		while True:
-			self.current_time = datetime.datetime.now()
-			self.setupMode()
-			self.gettimeformLocaltime()
-			self.checkAlarmOpenpump()
-			if self.current_time >= self.time_alert_receive_in:
-				self.set_LoRa_no_connect("in")
+			try:
+				self.setupMode()
+				"""
+				box_out.log_event("lora_not_connect" , "BattLow")
+				box_out.log_event("batt_alarm" , "BattLow")
+				box_out.log_event("temp_alarm" , "BattLow")
+				box_out.log_event("humi_alarm" , "BattLow")
+				"""
+				self.current_time = datetime.datetime.now()
+				self.setupMode()
+				self.gettimeformLocaltime()
+				self.checkAlarmOpenpump()
+				if self.current_time >= self.time_alert_receive_in:
+					self.set_LoRa_no_connect("in")
 			
-			if self.current_time >= self.time_alert_receive_out:
-				self.set_LoRa_no_connect("out")
+				if self.current_time >= self.time_alert_receive_out:
+					self.set_LoRa_no_connect("out")
 			
-			if self.statusBox == True:
-				sleep(1)
-				self.send_data()
+				if self.statusBox == True:
+					sleep(1)
+					self.send_data()
+			except Exception as e:
+				current_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+				print("System Error : ",e)
+				with open('Log file/logfile_error.txt', 'a') as file:
+					file.write('time : '+current_time_str)
+					file.write(' error : '+str(e)+"\n")
+					try:
+					    box_in.connect()
+					    box_out.connect()
+					except:
+					    pass
+				continue
 				
-				 
 	def send_data_to_box_out(self,status):
 		if status == True:
 			#addr_gateway + addr_boxout + status data + status hard reset + status pump + time to pump active
@@ -1745,64 +1781,24 @@ class LoRaRcvCont(LoRa):
 		self.statusBoxout = False
 		self.statusBox = False
 		self.statusBoxoutblynk = True
-
-	def send_data2(self, addr_dest, status):
-		if addr_dest == self.address_in:
-			"""
-			status 0 = data correct set ESP32 to sleep
-			status 1 = data not correct set ESP32 to sent data to RPi again
-			"""
-			if status == 1:
-				self.sumdataboxin = self.address_gateway+","+self.address_in+",0,"+str(self.hardresetboxin)
-			
-			if self.huminsoil < self.humidityPumpStart :
-				self.sumdataboxin = self.address_gateway+","+self.address_in+",2,"+str(self.hardresetboxin)
-			
-			if status == 1:
-				self.sumdataboxin = self.address_gateway+","+self.address_in+",1,"+str(self.hardresetboxin)
-				print(self.sumdataboxin)
-			print("send to Boxin  "  +self.sumdataboxin)
-			print("-------send Pi to Boxin-------")
-			self.write_payload(self.sumdataboxin)
-			self.set_mode(MODE.TX)
-			self.clear_irq_flags(TxDone=1)
-			sleep(0.5) 
-			self.set_mode(MODE.STDBY)
-			self.set_mode(MODE.RXCONT)
-			self.statusBoxin = False
-			self.statusBox = False
-			self.statusBoxinblynk = True
-			self.hardresetboxin=0
-			self.updateBlynk()
-			
-		elif addr_dest == self.address_out:
-			
-			if status == 0:
-				self.sumdataboxout = self.address_gateway+","+self.address_out+",0,"+str(self.hardresetboxout)+","+str(self.statusPump)+","+str(self.setwaitpump)
-			
-			else:
-				self.sumdataboxout = self.address_gateway+","+self.address_out+",1,"+str(self.hardresetboxout)+","+str(self.statusPump)+","+str(self.setwaitpump)
-			
-			print("send to Boxout  "  +self.sumdataboxout)
-			print("-------send Pi to Boxout-------")
-			self.write_payload(self.sumdataboxout)
-			self.set_mode(MODE.TX)
-			self.clear_irq_flags(TxDone=1)
-			sleep(0.5) 
-			self.set_mode(MODE.STDBY)
-			self.set_mode(MODE.RXCONT)
-			self.statusBoxout = False
-			self.statusBox = False
-			self.statusBoxoutblynk = True
-			self.hardresetboxout=0
-			self.statusPump = 0 
-			self.setwaitpump= 0
-			self.updateBlynk()
 	
 	def checkStatusPump(self):
+		print("self.statuspump : ",self.statusPump)
 		if self.huminsoil < self.humidityPumpStart and self.huminsoil != 0:
-			self.statusPump = 2
+			self.statePump = 2
+			
+		elif self.statusPump == 1:
+			self.statePump = 1
 		
+		elif self.statusPumpOnWeb == 3 :
+			self.statusPump = 3
+			
+		elif self.statusPumpOnBoxOut == 1 :
+			self.statePump = 3
+			
+		elif self.statusPumpOnWeb == 4 or (self.huminsoil > self.humidityPumpStart and self.huminsoil == 0) or self.statusPumpOnBoxOut == 0: 
+			self.statePump = 0;
+	"""
 		if self.huminsoil > self.humidityPumpStart or self.huminsoil == 0:
 			self.statusPump = 0
 		
@@ -1825,13 +1821,13 @@ class LoRaRcvCont(LoRa):
 			box_out.virtual_write(41, 4)
 			
 		#if self.statusAC == 1 and  
-		
+	"""
 	def send_data(self):
 		print("statusBoxout : ",self.statusBoxout)
 		if self.statusBoxin == True:
-			print("huminsiol : ",self.huminsoil)
+			print("humi_soil : ",self.humi_soil)
 			print("humidityPumpStart : ",self.humidityPumpStart)
-			if self.huminsoil < self.humidityPumpStart and self.huminsoil != 0 and self.pumpHumidity != 0:
+			if self.humi_soil < self.humidityPumpStart and self.humi_soil != 0 and self.pumpHumidity != 0:
 				print("statusPump : ",self.statusPump)
 				#sumdataboxin = addr_gateway + addr_boxin + status data + status hard reset
 				self.sumdataboxin = self.address_gateway+","+self.address_in+",2,"+str(self.hardresetboxin)
@@ -1879,8 +1875,21 @@ class LoRaRcvCont(LoRa):
 				#self.hardresetboxin=0
                 
 		if self.statusBoxout == True:
-			if  self.huminsoil < self.humidityPumpStart and self.huminsoil != 0 and self.pumpHumidity != 0	:
-				self.statusPump	= 2	
+			#self.checkStatusPump()
+			print("Status pump : ", self.statusPump)
+			#print("status pump : ", self.setwaitpump)
+			self.sumdataboxout = self.address_gateway+","+self.address_out+",0,"+str(self.hardresetboxout)+","+str(self.statusPump)+","+str(self.setwaitpump)
+			print("humisiol : ",self.humi_soil)
+			print("humidityPumpStart : ",self.humidityPumpStart)
+			if  self.humi_soil < self.humidityPumpStart and self.humi_soil != 0 and self.pumpHumidity != 0	:
+				self.statusPump	= 2
+				self.pumpWorkByHumiDone = False
+				print("statusPump : ",self.statusPump)
+				#sumdataboxin = addr_gateway + addr_boxout + status data + status hard reset + status pump + time to pump active
+				self.sumdataboxout = self.address_gateway+","+self.address_out+",0,"+str(self.hardresetboxout)+","+str(self.statusPump)+","+str(self.setwaitpump)
+			elif  self.humi_soil > self.humidityPumpStart and self.pumpHumidity != 0 and self.pumpWorkByHumiDone == False:
+				self.statusPump	= 4	
+				self.pumpWorkByHumiDone = True
 				print("statusPump : ",self.statusPump)
 				#sumdataboxin = addr_gateway + addr_boxout + status data + status hard reset + status pump + time to pump active
 				self.sumdataboxout = self.address_gateway+","+self.address_out+",0,"+str(self.hardresetboxout)+","+str(self.statusPump)+","+str(self.setwaitpump)
@@ -1888,8 +1897,10 @@ class LoRaRcvCont(LoRa):
 				print("statusPump : ",self.statusPump)
 				#sumdataboxin = addr_gateway + addr_boxout + status data + status hard reset + status pump + time to pump active
 				self.sumdataboxout = self.address_gateway+","+self.address_out+",0,"+str(self.hardresetboxout)+","+str(self.statusPump)+","+str(self.setwaitpump)
+			
 			print("send to Boxout  "  +self.sumdataboxout)
 			print("-------send Pi to Boxout-------")
+			print("state pump : ", self.statePump)
 			self.write_payload(self.sumdataboxout)
 			self.set_mode(MODE.TX)
 			self.clear_irq_flags(TxDone=1)
@@ -1900,8 +1911,11 @@ class LoRaRcvCont(LoRa):
 			self.statusBox = False
 			self.statusBoxoutblynk = True
 			self.hardresetboxout=0
-			self.statusPump = 0 
+			self.statusPump = 0
+			print("Status pump : ", self.statusPump)
 			self.setwaitpump= 0
+			#f self.statusPumpOnBoxOut == 0 and self.statusPumpOnWeb == 3 :
+			print("update blynkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk")
 			self.updateBlynk()
 			#print(bytes(send_payload).decode("utf-8", "ignore"))
 			#sleep(0.1
@@ -1932,12 +1946,14 @@ class LoRaRcvCont(LoRa):
 				self.addressGateway_rx = payload[1]
 				payload_without_first_three = payload[2:]
 				payload_as_str = [str(item) for item in payload]
+				self.statusBox = True
+				
 				
 				self.receivedboxin_data  = ''.join([chr(num) for num in payload_without_first_three])
 				print("Received Boxin (as string):", self.receivedboxin_data)
 				data_list = self.receivedboxin_data.split(',')
 				current_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-				with open('logfile_boxin 8-3.txt', 'a') as file:
+				with open('logfile_boxin 12 - 3.txt', 'a') as file:
 					file.write('\n'+current_time_str)
 					file.write('\nReceive as byte		: '+','.join(payload_as_str))
 					file.write('\nReceive as String	: '+self.receivedboxin_data)
@@ -1948,7 +1964,7 @@ class LoRaRcvCont(LoRa):
 					self.tempinair = float(data_list[1])  
 					self.huminair = float(data_list[2])
 					self.huminbox = float(data_list[3])  
-					self.huminsoil = float(data_list[4])
+					self.humi_soil = float(data_list[4])
 					self.light = float(data_list[5])
 					self.battery_boxin = float(data_list[6])
 					self.battery_boxin = ((self.battery_boxin - 2.5) * (100 - 0)) / (4.2 - 2.5) + 0
@@ -1978,8 +1994,10 @@ class LoRaRcvCont(LoRa):
 				print("Received Boxout (as string):", self.receivedboxout_data)
 				data_list = self.receivedboxout_data.split(',')
 				current_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+				self.statusBox = True
+				
 
-				with open('logfile_boxout 8-3.txt', 'a') as file:
+				with open('logfile_boxout 12 - 3.txt', 'a') as file:
 					file.write('\n'+current_time_str)
 					file.write('\nReceive as byte		: '+','.join(payload_as_str))
 					file.write('\nReceive as String	: '+self.receivedboxout_data)
@@ -1994,12 +2012,13 @@ class LoRaRcvCont(LoRa):
 					self.battery_boxout = float(data_list[5])
 					self.battery_boxout = ((self.battery_boxout - 2.5) * (100 - 0)) / (4.2 - 2.5) + 0
 					self.statusPumpOnBoxOut = int(data_list[6])
-					if self.statusPumpOnBoxOut == 0:
+					if self.statusPumpOnBoxOut == 0 :
 						self.statusPumpOnBoxOut = 4
 					else :
 						self.statusPumpOnBoxOut = 3
+					
 					print("statusPumpOnBoxOut : ",self.statusPumpOnBoxOut)
-					self.statusBox = True
+					
 					self.statusBoxout = True
 					print("box out receive true")
 					self.updateTimeLoRaConnect("out")
@@ -2017,21 +2036,7 @@ class LoRaRcvCont(LoRa):
 				#	sleep(1)
 		else: print("----------don't care----------")
         
-        #sleep(3)
-        # ส่งข้อมูลกลับ "CPE"
-        #self.sumdataesp32 = str(self.setalertbatt)+","+"50"
-        #self.send_data(self.sumdataesp32)
-
-        # เปลี่ยนเป็น RX mode และเตรียมรับข้อมูลอีกครั้ง
-        #self.reset_ptr_rx()
-        #self.set_mode(MODE.RXCONT)
-        #sys.stdout.flush()
-    
- 
-        
-
-
-lora = LoRaRcvCont(verbose=True)
+lora = LoRaGateway(verbose=True)
 lora.set_mode(MODE.STDBY)
 
 lora.set_pa_config(pa_select=1)
